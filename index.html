@@ -25,80 +25,110 @@
     </div>
 
     <script>
-        // IPTV Deep-Links Definition
+        // IPTV Deep-Links & Stream-Plattformen
         const iptvLinks = {
             "RTL": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=RTL;end",
             "RTL+": "https://plus.rtl.de",
             "ProSieben": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=Pro7;end",
+            "ProSieben MAXX": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=ProSiebenMAXX;end",
             "MagentaSport": "https://www.magentasport.de",
+            "Sportdeutschland.TV": "https://sportdeutschland.tv",
             "DAZN": "dazn://" 
         };
 
-        function getPlattform(sport) {
-            if (sport === "football") return "RTL+ / DAZN";
-            if (sport === "hockey") return "MagentaSport / ProSieben";
-            return "Stream";
-        }
+        // Zeitfenster festlegen (vor 48 Stunden bis in 7 Tage)
+        const now = new Date();
+        const past48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+        const future7Days = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
+
+        // DATENQUELLE 1: Manuelle Termine für Ligen ohne offizielle Gratis-API (GFL / ELF)
+        // Sobald die genauen Spieltage feststehen, einfach hier eintragen. Das Handy filtert sie automatisch nach Datum!
+        const localFootballGames = [
+            {
+                dateObj: new Date("2026-05-24T15:00:00"), // Beispiel-Datum für die Saison 2026
+                sport: "GFL Football",
+                matchName: "Schwäbisch Hall Unicorns @ Potsdam Royals",
+                score: "- : -",
+                live: false,
+                statusText: "24. Mai - 15:00",
+                plattform: "Sportdeutschland.TV",
+                link: iptvLinks["Sportdeutschland.TV"]
+            },
+            {
+                dateObj: new Date("2026-05-31T16:25:00"),
+                sport: "ELF Football",
+                matchName: "Rhein Fire @ Frankfurt Galaxy",
+                score: "- : -",
+                live: false,
+                statusText: "31. Mai - 16:25",
+                plattform: "ProSieben MAXX / Joyn",
+                link: iptvLinks["ProSieben MAXX"]
+            }
+        ];
 
         async function fetchScores() {
             const container = document.getElementById('games-container');
             const updateTimeSpan = document.getElementById('update-time');
-            
             const proxy = "https://api.allorigins.win/raw?url=";
             
+            // DATENQUELLE 2: Offizielle internationale APIs (NFL & IIHF Eishockey-WM)
             const apis = [
-                { name: "American Football", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"), type: "football" },
-                { name: "Eishockey", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard"), type: "hockey" }
+                { name: "NFL Football", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"), plattform: "RTL+ / DAZN" },
+                { name: "Eishockey WM", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/hockey/mens-world-championship/scoreboard"), plattform: "MagentaSport / ProSieben" }
             ];
-
-            // Zeitfenster definieren (Jetzt, vor 48 Stunden, in 7 Tagen)
-            const now = new Date();
-            const past48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
-            const future7Days = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
 
             try {
                 let gamesFound = [];
 
-                for (const api of apis) {
-                    const response = await fetch(api.url);
-                    if (!response.ok) continue;
-                    const data = await response.json();
-                    
-                    if (data.events) {
-                        data.events.forEach(event => {
-                            const gameDate = new Date(event.date); // Das Datum des Spiels von der API
-                            
-                            // HIER IST DER FILTER: Nur Spiele der letzten 48h bis nächsten 7 Tage zulassen
-                            if (gameDate >= past48Hours && gameDate <= future7Days) {
-                                const status = event.status.type.state; // "pre", "in", "post"
-                                const statusText = event.status.type.detail;
-                                const homeTeam = event.competitions[0].competitors[0];
-                                const awayTeam = event.competitions[0].competitors[1];
-                                
-                                gamesFound.push({
-                                    dateObj: gameDate, // Für die spätere Sortierung
-                                    sport: api.name,
-                                    matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
-                                    score: `${awayTeam.score} - ${homeTeam.score}`,
-                                    live: status === "in",
-                                    statusText: statusText,
-                                    plattform: getPlattform(api.type),
-                                    link: iptvLinks[getPlattform(api.type).split(' / ')[0]] || "#"
-                                });
-                            }
-                        });
+                // 1. Lokale Spiele (GFL/ELF) filtern, die im 48h / 7-Tage-Fenster liegen
+                localFootballGames.forEach(game => {
+                    if (game.dateObj >= past48Hours && game.dateObj <= future7Days) {
+                        gamesFound.push(game);
                     }
+                });
+
+                // 2. API-Spiele (NFL & WM) abrufen und filtern
+                for (const api of apis) {
+                    try {
+                        const response = await fetch(api.url);
+                        if (!response.ok) continue;
+                        const data = await response.json();
+                        
+                        if (data.events) {
+                            data.events.forEach(event => {
+                                const gameDate = new Date(event.date);
+                                
+                                if (gameDate >= past48Hours && gameDate <= future7Days) {
+                                        const status = event.status.type.state;
+                                        const statusText = event.status.type.detail;
+                                        const homeTeam = event.competitions[0].competitors[0];
+                                        const awayTeam = event.competitions[0].competitors[1];
+                                        
+                                        gamesFound.push({
+                                            dateObj: gameDate,
+                                            sport: api.name,
+                                            matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
+                                            score: `${awayTeam.score} - ${homeTeam.score}`,
+                                            live: status === "in",
+                                            statusText: statusText,
+                                            plattform: api.plattform,
+                                            link: iptvLinks[api.plattform.split(' / ')[0]] || "#"
+                                        });
+                                }
+                            });
+                        }
+                    } catch (e) { console.error("Fehler bei API:", api.name); }
                 }
 
-                // Spiele chronologisch sortieren (Älteste/Aktuelle zuerst, zukünftige danach)
+                // Alle Spiele (API + Manuell) chronologisch sortieren
                 gamesFound.sort((a, b) => a.dateObj - b.dateObj);
 
                 if (gamesFound.length === 0) {
-                    container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Spiele im Zeitraum (vor 48h bis +7 Tage) gefunden.</div>';
+                    container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine anstehenden Spiele (Football / WM) im aktuellen Zeitraum gefunden.</div>';
                     return;
                 }
 
-                // Generiere die HTML-Karten fürs Widget
+                // HTML generieren
                 container.innerHTML = gamesFound.map(game => `
                     <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
                         <div class="flex-1 min-w-0">
@@ -126,7 +156,6 @@
                 updateTimeSpan.innerText = `Prüfung: ${now.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
 
             } catch (error) {
-                console.error(error);
                 container.innerHTML = '<div class="text-center text-rose-500 py-4">Fehler beim Laden der Live-Daten.</div>';
             }
         }
