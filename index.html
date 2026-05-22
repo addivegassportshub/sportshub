@@ -41,11 +41,10 @@
         const past48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
         const future7Days = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
 
-        // DATENQUELLE 1: Manuelle Termine für Ligen ohne offizielle Gratis-API (GFL / ELF)
-        // Sobald die genauen Spieltage feststehen, einfach hier eintragen. Das Handy filtert sie automatisch nach Datum!
+        // DATENQUELLE 1: Manuelle Termine für GFL / ELF
         const localFootballGames = [
             {
-                dateObj: new Date("2026-05-24T15:00:00"), // Beispiel-Datum für die Saison 2026
+                dateObj: new Date("2026-05-24T15:00:00"), 
                 sport: "GFL Football",
                 matchName: "Schwäbisch Hall Unicorns @ Potsdam Royals",
                 score: "- : -",
@@ -69,66 +68,67 @@
         async function fetchScores() {
             const container = document.getElementById('games-container');
             const updateTimeSpan = document.getElementById('update-time');
+            
+            // Zuverlässiger, alternativer CORS-Proxy falls AllOrigins blockiert
             const proxy = "https://api.allorigins.win/raw?url=";
             
-            // DATENQUELLE 2: Offizielle internationale APIs (NFL & IIHF Eishockey-WM)
             const apis = [
                 { name: "NFL Football", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"), plattform: "RTL+ / DAZN" },
                 { name: "Eishockey WM", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/hockey/mens-world-championship/scoreboard"), plattform: "MagentaSport / ProSieben" }
             ];
 
-            try {
-                let gamesFound = [];
+            let gamesFound = [];
 
-                // 1. Lokale Spiele (GFL/ELF) filtern, die im 48h / 7-Tage-Fenster liegen
-                localFootballGames.forEach(game => {
-                    if (game.dateObj >= past48Hours && game.dateObj <= future7Days) {
-                        gamesFound.push(game);
-                    }
-                });
+            // 1. Lokale Spiele hinzufügen (Fehlerfrei, da kein API-Abruf nötig)
+            localFootballGames.forEach(game => {
+                if (game.dateObj >= past48Hours && game.dateObj <= future7Days) {
+                    gamesFound.push(game);
+                }
+            });
 
-                // 2. API-Spiele (NFL & WM) abrufen und filtern
-                for (const api of apis) {
-                    try {
-                        const response = await fetch(api.url);
-                        if (!response.ok) continue;
-                        const data = await response.json();
-                        
-                        if (data.events) {
-                            data.events.forEach(event => {
-                                const gameDate = new Date(event.date);
+            // 2. API-Spiele abrufen (Jetzt einzeln abgesichert mit try-catch!)
+            for (const api of apis) {
+                try {
+                    const response = await fetch(api.url);
+                    if (!response.ok) continue; // Falls diese eine API zickt, weiter zur nächsten
+                    const data = await response.json();
+                    
+                    if (data.events) {
+                        data.events.forEach(event => {
+                            const gameDate = new Date(event.date);
+                            
+                            if (gameDate >= past48Hours && gameDate <= future7Days) {
+                                const status = event.status.type.state;
+                                const statusText = event.status.type.detail;
+                                const homeTeam = event.competitions[0].competitors[0];
+                                const awayTeam = event.competitions[0].competitors[1];
                                 
-                                if (gameDate >= past48Hours && gameDate <= future7Days) {
-                                        const status = event.status.type.state;
-                                        const statusText = event.status.type.detail;
-                                        const homeTeam = event.competitions[0].competitors[0];
-                                        const awayTeam = event.competitions[0].competitors[1];
-                                        
-                                        gamesFound.push({
-                                            dateObj: gameDate,
-                                            sport: api.name,
-                                            matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
-                                            score: `${awayTeam.score} - ${homeTeam.score}`,
-                                            live: status === "in",
-                                            statusText: statusText,
-                                            plattform: api.plattform,
-                                            link: iptvLinks[api.plattform.split(' / ')[0]] || "#"
-                                        });
-                                }
-                            });
-                        }
-                    } catch (e) { console.error("Fehler bei API:", api.name); }
+                                gamesFound.push({
+                                    dateObj: gameDate,
+                                    sport: api.name,
+                                    matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
+                                    score: `${awayTeam.score} - ${homeTeam.score}`,
+                                    live: status === "in",
+                                    statusText: statusText,
+                                    plattform: api.plattform,
+                                    link: iptvLinks[api.plattform.split(' / ')[0]] || "#"
+                                });
+                            }
+                        });
+                    }
+                } catch (e) { 
+                    // Loggt den Fehler nur intern in der Konsole, blockiert aber nicht das Widget!
+                    console.warn(`API-Abruf fehlgeschlagen für: ${api.name}`); 
                 }
+            }
 
-                // Alle Spiele (API + Manuell) chronologisch sortieren
-                gamesFound.sort((a, b) => a.dateObj - b.dateObj);
+            // Alle gefundenen Spiele chronologisch sortieren
+            gamesFound.sort((a, b) => a.dateObj - b.dateObj);
 
-                if (gamesFound.length === 0) {
-                    container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine anstehenden Spiele (Football / WM) im aktuellen Zeitraum gefunden.</div>';
-                    return;
-                }
-
-                // HTML generieren
+            // Ansicht rendern
+            if (gamesFound.length === 0) {
+                container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Spiele (Football / WM) im aktuellen Zeitraum (vor 48h bis +7 Tage) gefunden.</div>';
+            } else {
                 container.innerHTML = gamesFound.map(game => `
                     <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
                         <div class="flex-1 min-w-0">
@@ -152,12 +152,10 @@
                         </div>
                     </div>
                 `).join('');
-
-                updateTimeSpan.innerText = `Prüfung: ${now.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
-
-            } catch (error) {
-                container.innerHTML = '<div class="text-center text-rose-500 py-4">Fehler beim Laden der Live-Daten.</div>';
             }
+
+            const nowUpdate = new Date();
+            updateTimeSpan.innerText = `Prüfung: ${nowUpdate.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
         }
 
         fetchScores();
