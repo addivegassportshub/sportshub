@@ -33,6 +33,7 @@
             "ProSieben MAXX": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=ProSiebenMAXX;end",
             "MagentaSport": "https://www.magentasport.de",
             "Sportdeutschland.TV": "https://sportdeutschland.tv",
+            "DF1": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=DF1;end",
             "DAZN": "dazn://" 
         };
 
@@ -41,93 +42,105 @@
         const past48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
         const future7Days = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
 
-        // DATENQUELLE 1: Manuelle Termine für GFL / ELF
+        // DATENQUELLE 1: Manuelle Termine (GFL-Konferenz am Sonntag)
         const localFootballGames = [
             {
                 dateObj: new Date("2026-05-24T15:00:00"), 
                 sport: "GFL Football",
-                matchName: "Schwäbisch Hall Unicorns @ Potsdam Royals",
+                matchName: "GFL Konferenz (u.a. Unicorns @ Royals)",
                 score: "- : -",
                 live: false,
-                statusText: "24. Mai - 15:00",
-                plattform: "Sportdeutschland.TV",
-                link: iptvLinks["Sportdeutschland.TV"]
-            },
-            {
-                dateObj: new Date("2026-05-31T16:25:00"),
-                sport: "ELF Football",
-                matchName: "Rhein Fire @ Frankfurt Galaxy",
-                score: "- : -",
-                live: false,
-                statusText: "31. Mai - 16:25",
-                plattform: "ProSieben MAXX / Joyn",
-                link: iptvLinks["ProSieben MAXX"]
+                statusText: "So. 24. Mai - 15:00",
+                plattform: "DF1 / Sportdeutschland.TV",
+                link: iptvLinks["DF1"]
             }
         ];
 
         async function fetchScores() {
             const container = document.getElementById('games-container');
             const updateTimeSpan = document.getElementById('update-time');
-            
-            // Zuverlässiger, alternativer CORS-Proxy falls AllOrigins blockiert
             const proxy = "https://api.allorigins.win/raw?url=";
             
-            const apis = [
-                { name: "NFL Football", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"), plattform: "RTL+ / DAZN" },
-                { name: "Eishockey WM", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/hockey/mens-world-championship/scoreboard"), plattform: "MagentaSport / ProSieben" }
-            ];
-
             let gamesFound = [];
 
-            // 1. Lokale Spiele hinzufügen (Fehlerfrei, da kein API-Abruf nötig)
+            // 1. GFL Konferenz hinzufügen
             localFootballGames.forEach(game => {
                 if (game.dateObj >= past48Hours && game.dateObj <= future7Days) {
                     gamesFound.push(game);
                 }
             });
 
-            // 2. API-Spiele abrufen (Jetzt einzeln abgesichert mit try-catch!)
-            for (const api of apis) {
-                try {
-                    const response = await fetch(api.url);
-                    if (!response.ok) continue; // Falls diese eine API zickt, weiter zur nächsten
+            // 2. API-Abruf von ESPN (NFL)
+            try {
+                const nflUrl = proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
+                const response = await fetch(nflUrl);
+                if (response.ok) {
                     const data = await response.json();
-                    
                     if (data.events) {
                         data.events.forEach(event => {
                             const gameDate = new Date(event.date);
-                            
                             if (gameDate >= past48Hours && gameDate <= future7Days) {
                                 const status = event.status.type.state;
-                                const statusText = event.status.type.detail;
-                                const homeTeam = event.competitions[0].competitors[0];
-                                const awayTeam = event.competitions[0].competitors[1];
-                                
                                 gamesFound.push({
                                     dateObj: gameDate,
-                                    sport: api.name,
-                                    matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
-                                    score: `${awayTeam.score} - ${homeTeam.score}`,
+                                    sport: "NFL Football",
+                                    matchName: `${event.competitions[0].competitors[1].team.displayName} @ ${event.competitions[0].competitors[0].team.displayName}`,
+                                    score: `${event.competitions[0].competitors[1].score} - ${event.competitions[0].competitors[0].score}`,
                                     live: status === "in",
-                                    statusText: statusText,
-                                    plattform: api.plattform,
-                                    link: iptvLinks[api.plattform.split(' / ')[0]] || "#"
+                                    statusText: event.status.type.detail,
+                                    plattform: "RTL+ / DAZN",
+                                    link: iptvLinks["RTL+"]
                                 });
                             }
                         });
                     }
-                } catch (e) { 
-                    // Loggt den Fehler nur intern in der Konsole, blockiert aber nicht das Widget!
-                    console.warn(`API-Abruf fehlgeschlagen für: ${api.name}`); 
                 }
-            }
+            } catch (e) { console.warn("NFL API schläft."); }
 
-            // Alle gefundenen Spiele chronologisch sortieren
+            // 3. API-Abruf von TheSportsDB (Eishockey WM)
+            // Wir fragen die Events der Internationalen Eishockey-Liga/WM ab (In TheSportsDB oft Liga-ID für IIHF)
+            try {
+                // Freier API-Pfad von TheSportsDB für Live/aktuelle Events
+                const sportsDbUrl = proxy + encodeURIComponent("https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d=" + now.toISOString().split('T')[0]);
+                const response = await fetch(sportsDbUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.events) {
+                        data.events.forEach(event => {
+                            // Wir filtern gezielt nach Eishockey (Ice Hockey) oder dem Begriff "World Championship" / "IIHF"
+                            if (event.strSport === "Ice Hockey" || event.strLeague.includes("World Championship")) {
+                                const gameDate = new Date(event.strTimestamp || event.dateEvent + "T" + event.strTime);
+                                
+                                // Deutsche Sender-Zuweisungslogik für die WM
+                                let plattform = "MagentaSport";
+                                let link = iptvLinks["MagentaSport"];
+                                if (event.strEvent.includes("Germany") || event.strEvent.includes("Deutschland")) {
+                                    plattform = "ProSieben / MagentaSport";
+                                    link = iptvLinks["ProSieben"];
+                                }
+
+                                gamesFound.push({
+                                    dateObj: gameDate,
+                                    sport: "Eishockey WM",
+                                    matchName: `${event.strEventAlternate || event.strEvent}`,
+                                    score: `${event.intHomeScore || 0} - ${event.intAwayScore || 0}`,
+                                    live: event.strStatus === "讀" || event.strProgress > 0, // "In Progress" Erkennung
+                                    statusText: event.strStatus === "Match Finished" ? "Final" : (event.strTime ? event.strTime.substring(0,5) + " Uhr" : "Heute"),
+                                    plattform: plattform,
+                                    link: link
+                                });
+                            }
+                        });
+                    }
+                }
+            } catch (e) { console.warn("TheSportsDB API Fehler."); }
+
+            // Alle Spiele chronologisch sortieren
             gamesFound.sort((a, b) => a.dateObj - b.dateObj);
 
-            // Ansicht rendern
+            // In das Widget rendern
             if (gamesFound.length === 0) {
-                container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Spiele (Football / WM) im aktuellen Zeitraum (vor 48h bis +7 Tage) gefunden.</div>';
+                container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Live-Events oder anstehenden Spiele (WM / GFL) im Zeitfenster gefunden.</div>';
             } else {
                 container.innerHTML = gamesFound.map(game => `
                     <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
