@@ -27,13 +27,15 @@
     <script>
         // IPTV Deep-Links & Stream-Plattformen
         const iptvLinks = {
+            "ARD": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=DasErste;end",
+            "ZDF": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=ZDF;end",
             "RTL": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=RTL;end",
             "RTL+": "https://plus.rtl.de",
+            "Sky Sport": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=SkySport;end",
             "ProSieben": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=Pro7;end",
             "ProSieben MAXX": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=ProSiebenMAXX;end",
             "MagentaSport": "https://www.magentasport.de",
             "Sportdeutschland.TV": "https://sportdeutschland.tv",
-            "DF1": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=DF1;end",
             "DAZN": "dazn://" 
         };
 
@@ -42,17 +44,57 @@
         const past48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
         const future7Days = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
 
-        // DATENQUELLE 1: Manuelle Termine (GFL-Konferenz am Sonntag)
-        const localFootballGames = [
+        // DATENQUELLE 1: Feste Highlights (Eishockey-WM Endrunde, GFL, Pokal & F1)
+        const scheduleGames = [
+            {
+                dateObj: new Date("2026-05-22T16:15:00"), 
+                sport: "Eishockey WM",
+                matchName: "Deutschland vs. Gruppenphase (Live)",
+                score: "- : -",
+                live: false,
+                statusText: "Fr. 22. Mai - 16:15",
+                plattform: "MagentaSport / ProSieben",
+                link: iptvLinks["MagentaSport"]
+            },
+            {
+                dateObj: new Date("2026-05-23T20:00:00"), 
+                sport: "DFB-Pokal",
+                matchName: "Finale 2026: Das Endspiel in Berlin",
+                score: "- : -",
+                live: false,
+                statusText: "Sa. 23. Mai - 20:00",
+                plattform: "ARD / Sky Sport",
+                link: iptvLinks["ARD"]
+            },
             {
                 dateObj: new Date("2026-05-24T15:00:00"), 
                 sport: "GFL Football",
-                matchName: "GFL Konferenz (u.a. Unicorns @ Royals)",
+                matchName: "Schwäbisch Hall Unicorns @ Potsdam Royals",
                 score: "- : -",
                 live: false,
                 statusText: "So. 24. Mai - 15:00",
-                plattform: "DF1 / Sportdeutschland.TV",
-                link: iptvLinks["DF1"]
+                plattform: "Sportdeutschland.TV",
+                link: iptvLinks["Sportdeutschland.TV"]
+            },
+            {
+                dateObj: new Date("2026-05-24T20:00:00"), 
+                sport: "Formel 1",
+                matchName: "Großer Preis von Kanada (Rennen in Montreal)",
+                score: "F1",
+                live: false,
+                statusText: "So. 24. Mai - 20:00",
+                plattform: "Sky Sport / RTL+",
+                link: iptvLinks["Sky Sport"]
+            },
+            {
+                dateObj: new Date("2026-05-28T16:15:00"), 
+                sport: "Eishockey WM",
+                matchName: "Viertelfinale 1 & 2",
+                score: "- : -",
+                live: false,
+                statusText: "Do. 28. Mai - 16:15",
+                plattform: "MagentaSport / ProSieben",
+                link: iptvLinks["ProSieben"]
             }
         ];
 
@@ -61,111 +103,93 @@
             const updateTimeSpan = document.getElementById('update-time');
             const proxy = "https://api.allorigins.win/raw?url=";
             
+            // DATENQUELLE 2: APIs im Hintergrund (NFL & Europäischer Fußball via ESPN)
+            const apis = [
+                { name: "NFL Football", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"), plattform: "RTL+ / DAZN" },
+                { name: "Fußball", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/soccer/ger.1/scoreboard"), plattform: "Sky / DAZN" }, // Bundesliga
+                { name: "Champions League", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/scoreboard"), plattform: "DAZN / Prime" }
+            ];
+
             let gamesFound = [];
 
-            // 1. GFL Konferenz hinzufügen
-            localFootballGames.forEach(game => {
+            // 1. Manuelle Termine einlesen (F1, GFL, Pokal, WM)
+            scheduleGames.forEach(game => {
                 if (game.dateObj >= past48Hours && game.dateObj <= future7Days) {
                     gamesFound.push(game);
                 }
             });
 
-            // 2. API-Abruf von ESPN (NFL)
-            try {
-                const nflUrl = proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
-                const response = await fetch(nflUrl);
-                if (response.ok) {
+            // 2. Automatisierte APIs abfragen
+            for (const api of apis) {
+                try {
+                    const response = await fetch(api.url);
+                    if (!response.ok) continue;
                     const data = await response.json();
+                    
                     if (data.events) {
                         data.events.forEach(event => {
                             const gameDate = new Date(event.date);
+                            
                             if (gameDate >= past48Hours && gameDate <= future7Days) {
                                 const status = event.status.type.state;
-                                gamesFound.push({
-                                    dateObj: gameDate,
-                                    sport: "NFL Football",
-                                    matchName: `${event.competitions[0].competitors[1].team.displayName} @ ${event.competitions[0].competitors[0].team.displayName}`,
-                                    score: `${event.competitions[0].competitors[1].score} - ${event.competitions[0].competitors[0].score}`,
-                                    live: status === "in",
-                                    statusText: event.status.type.detail,
-                                    plattform: "RTL+ / DAZN",
-                                    link: iptvLinks["RTL+"]
-                                });
-                            }
-                        });
-                    }
-                }
-            } catch (e) { console.warn("NFL API schläft."); }
-
-            // 3. API-Abruf von TheSportsDB (Eishockey WM)
-            // Wir fragen die Events der Internationalen Eishockey-Liga/WM ab (In TheSportsDB oft Liga-ID für IIHF)
-            try {
-                // Freier API-Pfad von TheSportsDB für Live/aktuelle Events
-                const sportsDbUrl = proxy + encodeURIComponent("https://www.thesportsdb.com/api/v1/json/1/eventsday.php?d=" + now.toISOString().split('T')[0]);
-                const response = await fetch(sportsDbUrl);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.events) {
-                        data.events.forEach(event => {
-                            // Wir filtern gezielt nach Eishockey (Ice Hockey) oder dem Begriff "World Championship" / "IIHF"
-                            if (event.strSport === "Ice Hockey" || event.strLeague.includes("World Championship")) {
-                                const gameDate = new Date(event.strTimestamp || event.dateEvent + "T" + event.strTime);
+                                const statusText = event.status.type.detail;
+                                const homeTeam = event.competitions[0].competitors[0];
+                                const awayTeam = event.competitions[0].competitors[1];
                                 
-                                // Deutsche Sender-Zuweisungslogik für die WM
-                                let plattform = "MagentaSport";
-                                let link = iptvLinks["MagentaSport"];
-                                if (event.strEvent.includes("Germany") || event.strEvent.includes("Deutschland")) {
-                                    plattform = "ProSieben / MagentaSport";
-                                    link = iptvLinks["ProSieben"];
+                                // Filter für europäische Pokale: Nur anzeigen, wenn ein deutsches Team mitspielt
+                                const deTeams = ["Bayern", "Dortmund", "Leverkusen", "Leipzig", "Stuttgart", "Frankfurt", "Freiburg", "Hoffenheim", "Mönchengladbach", "Werder", "Wolfsburg"];
+                                const isDeMatch = deTeams.some(team => homeTeam.team.displayName.includes(team) || awayTeam.team.displayName.includes(team));
+                                
+                                if (api.name !== "Champions League" || isDeMatch) {
+                                    gamesFound.push({
+                                        dateObj: gameDate,
+                                        sport: api.name,
+                                        matchName: `${awayTeam.team.displayName} vs. ${homeTeam.team.displayName}`,
+                                        score: `${awayTeam.score} - ${homeTeam.score}`,
+                                        live: status === "in",
+                                        statusText: statusText,
+                                        plattform: api.plattform,
+                                        link: iptvLinks[api.plattform.split(' / ')[0]] || "#"
+                                    });
                                 }
-
-                                gamesFound.push({
-                                    dateObj: gameDate,
-                                    sport: "Eishockey WM",
-                                    matchName: `${event.strEventAlternate || event.strEvent}`,
-                                    score: `${event.intHomeScore || 0} - ${event.intAwayScore || 0}`,
-                                    live: event.strStatus === "讀" || event.strProgress > 0, // "In Progress" Erkennung
-                                    statusText: event.strStatus === "Match Finished" ? "Final" : (event.strTime ? event.strTime.substring(0,5) + " Uhr" : "Heute"),
-                                    plattform: plattform,
-                                    link: link
-                                });
                             }
                         });
                     }
-                }
-            } catch (e) { console.warn("TheSportsDB API Fehler."); }
+                } catch (e) { console.warn(`API Aussetzer bei: ${api.name}`); }
+            }
 
-            // Alle Spiele chronologisch sortieren
+            // Chronologisch sortieren
             gamesFound.sort((a, b) => a.dateObj - b.dateObj);
 
-            // In das Widget rendern
             if (gamesFound.length === 0) {
-                container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Live-Events oder anstehenden Spiele (WM / GFL) im Zeitfenster gefunden.</div>';
-            } else {
-                container.innerHTML = gamesFound.map(game => `
-                    <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-1.5 mb-0.5">
-                                <span class="text-[9px] uppercase font-bold tracking-wider px-1 rounded ${game.live ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}">
-                                    ${game.live ? '● LIVE' : game.sport}
-                                </span>
-                                <span class="text-[10px] text-slate-400 truncate">${game.statusText}</span>
-                            </div>
-                            <h3 class="font-medium text-slate-200 truncate">${game.matchName}</h3>
-                        </div>
-                        
-                        <div class="flex items-center gap-3">
-                            <div class="text-right">
-                                <span class="font-bold text-slate-100 block text-xs sm:text-sm tracking-wider">${game.live || game.statusText.includes("Final") ? game.score : 'vs'}</span>
-                                <span class="text-[10px] text-slate-500 block">${game.plattform}</span>
-                            </div>
-                            <a href="${game.link}" class="bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 p-1.5 rounded transition text-center text-[11px] font-bold text-slate-300">
-                                📺
-                            </a>
-                        </div>
-                    </div>
-                `).join('');
+                container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Live-Events im Zeitfenster gefunden.</div>';
+                return;
             }
+
+            // HTML für das S24 Ultra Widget rendern
+            container.innerHTML = gamesFound.map(game => `
+                <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-1.5 mb-0.5">
+                            <span class="text-[9px] uppercase font-bold tracking-wider px-1 rounded ${game.live ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}">
+                                ${game.live ? '● LIVE' : game.sport}
+                            </span>
+                            <span class="text-[10px] text-slate-400 truncate">${game.statusText}</span>
+                        </div>
+                        <h3 class="font-medium text-slate-200 truncate">${game.matchName}</h3>
+                    </div>
+                    
+                    <div class="flex items-center gap-3">
+                        <div class="text-right">
+                            <span class="font-bold text-slate-100 block text-xs sm:text-sm tracking-wider">${game.live || game.statusText.includes("Final") ? game.score : 'vs'}</span>
+                            <span class="text-[10px] text-slate-500 block">${game.plattform}</span>
+                        </div>
+                        <a href="${game.link}" class="bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 p-1.5 rounded transition text-center text-[11px] font-bold text-slate-300">
+                                📺
+                        </a>
+                    </div>
+                </div>
+            `).join('');
 
             const nowUpdate = new Date();
             updateTimeSpan.innerText = `Prüfung: ${nowUpdate.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
