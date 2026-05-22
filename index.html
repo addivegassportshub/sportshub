@@ -6,162 +6,133 @@
     <title>Sport Stream & Score Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Versteckt Scrollbars im Smartphone-Widget */
+        /* Versteckt die Scrollbars im Widget für eine sauberere Optik */
         ::-webkit-scrollbar { display: none; }
         body { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-100 p-2 text-xs sm:text-sm select-none">
+<body class="bg-slate-940 text-slate-100 p-2 text-xs sm:text-sm select-none">
 
+    <!-- Mini-Header fürs Widget -->
     <div class="flex justify-between items-center border-b border-slate-800 pb-1.5 mb-2">
-        <span class="font-bold text-emerald-400 tracking-wide uppercase text-[11px]">Adrian's Sport Hub</span>
-        <span id="update-time" class="text-[10px] text-slate-500">Lade Daten...</span>
+        <span class="font-bold text-emerald-400 tracking-wide uppercase text-[11px]">My Sport Hub</span>
+        <span id="update-time" class="text-[10px] text-slate-500">Lade...</span>
     </div>
 
+    <!-- Container für die Spiele -->
     <div id="games-container" class="space-y-1.5">
         <div class="text-center text-slate-500 py-4">Suche nach Live-Events...</div>
     </div>
 
     <script>
-        // IPTV Link-Verknüpfung (Paketname angepasst an gängige Android-IPTV-Player)
+        // IPTV Deep-Links Definition
         const iptvLinks = {
             "RTL": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=RTL;end",
             "RTL+": "https://plus.rtl.de",
             "ProSieben": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=Pro7;end",
-            "ProSieben MAXX": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=Pro7Maxx;end",
             "MagentaSport": "https://www.magentasport.de",
-            "DAZN": "dazn://",
-            "Sky Sport F1": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=SkySportF1;end"
+            "DAZN": "dazn://" 
         };
 
-        function getPlattform(sport, details = "") {
-            if (sport === "NFL") return "RTL+ / DAZN";
-            if (sport === "ELF" || sport === "GFL") return "ProSieben MAXX / Stream";
-            if (sport === "Eishockey WM") return "MagentaSport / ProSieben";
-            if (sport === "Formel 1") return "Sky Sport F1 / RTL";
-            return "Live-Stream";
+        function getPlattform(sport) {
+            if (sport === "football") return "RTL+ / DAZN";
+            if (sport === "hockey") return "MagentaSport / ProSieben";
+            return "Stream";
         }
-
-        // Lokaler Kalender-Fallback für europäische Ligen, da keine US-API existiert
-        // HIER KANNST DU MANUELL DIE NÄCHSTEN ELF/GFL SPIELE EINTRAGEN (Beispiel-Daten)
-        const euroFootballGames = [
-            { sport: "ELF", matchName: "Rhein Fire - Frankfurt Galaxy", dateStr: "2026-05-24", timeStr: "16:25", durationHours: 3 },
-            { sport: "GFL", matchName: "Schwäbisch Hall Unicorns - Potsdam Royals", dateStr: "2026-05-23", timeStr: "16:00", durationHours: 3 }
-        ];
 
         async function fetchScores() {
             const container = document.getElementById('games-container');
             const updateTimeSpan = document.getElementById('update-time');
-            let gamesFound = [];
-
-            // 1. LIVE-APIs (ESPN) abfragen
+            
+            const proxy = "https://api.allorigins.win/raw?url=";
+            
             const apis = [
-                { name: "Eishockey WM", url: "https://site.api.espn.com/apis/site/v2/sports/hockey/iihf/scoreboard", type: "hockey" },
-                { name: "NFL", url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard", type: "nfl" },
-                { name: "Formel 1", url: "https://site.api.espn.com/apis/site/v2/sports/racing/f1/scoreboard", type: "f1" }
+                { name: "American Football", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"), type: "football" },
+                { name: "Eishockey", url: proxy + encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard"), type: "hockey" }
             ];
 
-            try {
-                for (const api of apis) {
-                    try {
-                        const response = await fetch(api.url);
-                        const data = await response.json();
-                        
-                        if (data.events) {
-                            data.events.forEach(event => {
-                                const status = event.status.type.state; 
-                                const statusText = event.status.type.detail;
-                                
-                                // Filter für NFL Offseason (Spiele im September ausblenden)
-                                if (api.type === "nfl" && status === "pre" && statusText.includes("September")) {
-                                    return; 
-                                }
+            // Zeitfenster definieren (Jetzt, vor 48 Stunden, in 7 Tagen)
+            const now = new Date();
+            const past48Hours = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+            const future7Days = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
 
+            try {
+                let gamesFound = [];
+
+                for (const api of apis) {
+                    const response = await fetch(api.url);
+                    if (!response.ok) continue;
+                    const data = await response.json();
+                    
+                    if (data.events) {
+                        data.events.forEach(event => {
+                            const gameDate = new Date(event.date); // Das Datum des Spiels von der API
+                            
+                            // HIER IST DER FILTER: Nur Spiele der letzten 48h bis nächsten 7 Tage zulassen
+                            if (gameDate >= past48Hours && gameDate <= future7Days) {
+                                const status = event.status.type.state; // "pre", "in", "post"
+                                const statusText = event.status.type.detail;
                                 const homeTeam = event.competitions[0].competitors[0];
                                 const awayTeam = event.competitions[0].competitors[1];
                                 
-                                // Datenstruktur für normale Spiele vs. Rennsport (F1) anpassen
-                                let matchName = "";
-                                let score = "vs";
-                                
-                                if (api.type === "f1") {
-                                    matchName = event.name; // Name des Grand Prix
-                                    score = status === "in" ? "LIVE" : "🏁";
-                                } else {
-                                    matchName = `${awayTeam.team.displayName} - ${homeTeam.team.displayName}`;
-                                    score = `${awayTeam.score} - ${homeTeam.score}`;
-                                }
-                                
                                 gamesFound.push({
+                                    dateObj: gameDate, // Für die spätere Sortierung
                                     sport: api.name,
-                                    matchName: matchName,
-                                    score: score,
+                                    matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
+                                    score: `${awayTeam.score} - ${homeTeam.score}`,
                                     live: status === "in",
                                     statusText: statusText,
-                                    plattform: getPlattform(api.name),
-                                    link: iptvLinks[getPlattform(api.name).split(' / ')[0]] || "#"
+                                    plattform: getPlattform(api.type),
+                                    link: iptvLinks[getPlattform(api.type).split(' / ')[0]] || "#"
                                 });
-                            });
-                        }
-                    } catch (e) { console.error("API Error bei " + api.name, e); }
-                }
-
-                // 2. Europäische Football Ligen (ELF / GFL) einrechnen
-                const now = new Date();
-                euroFootballGames.forEach(game => {
-                    const gameStart = new Date(`${game.dateStr}T${game.timeStr}:00`);
-                    const gameEnd = new Date(gameStart.getTime() + game.durationHours * 60 * 60 * 1000);
-                    
-                    let isLive = now >= gameStart && now <= gameEnd;
-                    let isPast = now > gameEnd;
-                    
-                    // Wir zeigen nur heutige, anstehende oder gerade laufende Spiele an
-                    if (!isPast) {
-                        gamesFound.push({
-                            sport: game.sport,
-                            matchName: game.matchName,
-                            score: isLive ? "LIVE" : "vs",
-                            live: isLive,
-                            statusText: isLive ? "Läuft gerade" : `${game.timeStr} Uhr`,
-                            plattform: getPlattform(game.sport),
-                            link: iptvLinks[getPlattform(game.sport).split(' / ')[0]] || "#"
+                            }
                         });
                     }
-                });
+                }
 
-                // 3. Ausgabe generieren
+                // Spiele chronologisch sortieren (Älteste/Aktuelle zuerst, zukünftige danach)
+                gamesFound.sort((a, b) => a.dateObj - b.dateObj);
+
                 if (gamesFound.length === 0) {
-                    container.innerHTML = '<div class="text-center text-slate-600 py-6 font-medium">Aktuell keine anstehenden Rennen oder Spiele.</div>';
+                    container.innerHTML = '<div class="text-center text-slate-500 py-6">Keine Spiele im Zeitraum (vor 48h bis +7 Tage) gefunden.</div>';
                     return;
                 }
 
+                // Generiere die HTML-Karten fürs Widget
                 container.innerHTML = gamesFound.map(game => `
-                    <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/5' : 'border-slate-800/80'} rounded-lg p-2 flex items-center justify-between gap-2">
+                    <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-1.5 mb-0.5">
-                                <span class="text-[9px] uppercase font-bold tracking-wider px-1 py-0.5 rounded ${game.live ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}">
+                                <span class="text-[9px] uppercase font-bold tracking-wider px-1 rounded ${game.live ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}">
                                     ${game.live ? '● LIVE' : game.sport}
                                 </span>
-                                <span class="text-[10px] text-slate-500 font-medium truncate">${game.statusText}</span>
+                                <span class="text-[10px] text-slate-400 truncate">${game.statusText}</span>
                             </div>
-                            <h3 class="font-semibold text-slate-200 text-xs sm:text-sm truncate tracking-wide">${game.matchName}</h3>
+                            <h3 class="font-medium text-slate-200 truncate">${game.matchName}</h3>
                         </div>
                         
                         <div class="flex items-center gap-3">
-                            <div class="text-right min-w-[55px]">
-                                <span class="font-bold text-slate-100 block text-xs sm:text-sm tracking-wider">${game.live || game.statusText.includes('Final') || game.sport === 'Formel 1' ? game.score : 'vs'}</span>
-                                <span class="text-[9px] text-slate-500 block mt-0.5 truncate">${game.plattform.split(' / ')[0]}</span>
+                            <div class="text-right">
+                                <span class="font-bold text-slate-100 block text-xs sm:text-sm tracking-wider">${game.live || game.statusText.includes("Final") ? game.score : 'vs'}</span>
+                                <span class="text-[10px] text-slate-500 block">${game.plattform}</span>
                             </div>
-                            <a href="${game.link}" class="bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 p-2 rounded-md transition text-center text-xs shadow-md">
+                            <a href="${game.link}" class="bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 p-1.5 rounded transition text-center text-[11px] font-bold text-slate-300">
                                 📺
                             </a>
                         </div>
                     </div>
                 `).join('');
 
-                updateTimeSpan.innerText = `Update: ${now.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
+                updateTimeSpan.innerText = `Prüfung: ${now.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
 
             } catch (error) {
-                container.innerHTML = '<div class="text-center text-rose-500 py-4">Schwerwiegender Fehler beim Laden der Daten.</div>';
+                console.error(error);
+                container.innerHTML = '<div class="text-center text-rose-500 py-4">Fehler beim Laden der Live-Daten.</div>';
             }
         }
+
+        fetchScores();
+        setInterval(fetchScores, 60000);
+    </script>
+</body>
+</html>
