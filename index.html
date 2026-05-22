@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sport Stream & Score Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Versteckt die Scrollbars im Widget für eine sauberere Optik */
+        ::-webkit-scrollbar { display: none; }
+        body { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-slate-940 text-slate-100 p-2 text-xs sm:text-sm select-none">
+
+    <!-- Mini-Header fürs Widget -->
+    <div class="flex justify-between items-center border-b border-slate-800 pb-1.5 mb-2">
+        <span class="font-bold text-emerald-400 tracking-wide uppercase text-[11px]">My Sport Hub</span>
+        <span id="update-time" class="text-[10px] text-slate-500">Lade...</span>
+    </div>
+
+    <!-- Container für die Spiele -->
+    <div id="games-container" class="space-y-1.5">
+        <div class="text-center text-slate-500 py-4">Suche nach Live-Events...</div>
+    </div>
+
+    <script>
+        // IPTV Deep-Links Definition (Anpassen an deine M3U-Kanalnamen in deiner IPTV App!)
+        const iptvLinks = {
+            "RTL": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=RTL;end",
+            "RTL+": "https://plus.rtl.de",
+            "ProSieben": "intent://#Intent;scheme=iptv;package=com.itv.android.iptv;S.channel_id=Pro7;end",
+            "MagentaSport": "https://www.magentasport.de",
+            "DAZN": "dazn://" // Öffnet direkt die DAZN App auf dem S24
+        };
+
+        // Hier definierst du, welche Sender standardmäßig für die Sportarten genutzt werden sollen
+        function getPlattform(sport, league) {
+            if (sport === "football") return "RTL+ / DAZN";
+            if (sport === "hockey") return "MagentaSport / ProSieben";
+            return "Stream";
+        }
+
+        async function fetchScores() {
+            const container = document.getElementById('games-container');
+            const updateTimeSpan = document.getElementById('update-time');
+            let htmlContent = '';
+            
+            // APIs, die wir direkt vom Handy aus abfragen (ESPN benötigt keinen API-Key!)
+            const apis = [
+                { name: "American Football", url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard", type: "football" },
+                { name: "Eishockey", url: "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard", type: "hockey" }
+            ];
+
+            try {
+                let gamesFound = [];
+
+                for (const api of apis) {
+                    const response = await fetch(api.url);
+                    const data = await response.json();
+                    
+                    if (data.events) {
+                        data.events.forEach(event => {
+                            const status = event.status.type.state; // "pre", "in", "post"
+                            const statusText = event.status.type.detail;
+                            const homeTeam = event.competitions[0].competitors[0];
+                            const awayTeam = event.competitions[0].competitors[1];
+                            
+                            gamesFound.push({
+                                sport: api.name,
+                                matchName: `${awayTeam.team.displayName} @ ${homeTeam.team.displayName}`,
+                                score: `${awayTeam.score} - ${homeTeam.score}`,
+                                live: status === "in",
+                                statusText: statusText,
+                                plattform: getPlattform(api.type),
+                                link: iptvLinks[getPlattform(api.type).split(' / ')[0]] || "#"
+                            });
+                        });
+                    }
+                }
+
+                if (gamesFound.length === 0) {
+                    container.innerHTML = '<div class="text-center text-slate-600 py-4">Aktuell keine anstehenden Spiele.</div>';
+                    return;
+                }
+
+                // Generiere die HTML-Karten fürs Widget
+                container.innerHTML = gamesFound.map(game => `
+                    <div class="bg-slate-900 border ${game.live ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-2 flex items-center justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-1.5 mb-0.5">
+                                <span class="text-[9px] uppercase font-bold tracking-wider px-1 rounded ${game.live ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}">
+                                    ${game.live ? '● LIVE' : game.sport}
+                                </span>
+                                <span class="text-[10px] text-slate-400 truncate">${game.statusText}</span>
+                            </div>
+                            <h3 class="font-medium text-slate-200 truncate">${game.matchName}</h3>
+                        </div>
+                        
+                        <div class="flex items-center gap-3">
+                            <div class="text-right">
+                                <span class="font-bold text-slate-100 block text-xs sm:text-sm tracking-wider">${game.live ? game.score : 'vs'}</span>
+                                <span class="text-[10px] text-slate-500 block">${game.plattform}</span>
+                            </div>
+                            <a href="${game.link}" class="bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 p-1.5 rounded transition text-center text-[11px] font-bold text-slate-300">
+                                📺
+                            </a>
+                        </div>
+                    </div>
+                `).join('');
+
+                const now = new Date();
+                updateTimeSpan.innerText = `Prüfung: ${now.toLocaleTimeString('de-DE', {hour: '2-digit', minute:'2-digit'})}`;
+
+            } catch (error) {
+                container.innerHTML = '<div class="text-center text-rose-500 py-4">Fehler beim Laden der Live-Daten.</div>';
+            }
+        }
+
+        // Sofort laden und dann alle 60 Sekunden aktualisieren, wenn das Widget offen ist
+        fetchScores();
+        setInterval(fetchScores, 60000);
+    </script>
+</body>
+</html>
